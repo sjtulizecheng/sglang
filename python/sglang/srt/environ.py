@@ -1244,6 +1244,9 @@ class Envs:
     # Use BF16 activations with FlashInfer CuTe DSL NVFP4 dense and MoE weights,
     # including the flashinfer_megamoe runner (BF16 combine).
     SGLANG_FLASHINFER_CUTEDSL_NVFP4_W4A16 = EnvBool(False)
+    # Bound the temporary int64 payload expansion used by SM90 Humming MXFP4
+    # weight preprocessing.
+    SGLANG_FLASHINFER_MXFP4_PREPROCESS_EXPERT_CHUNK_SIZE = EnvInt(4)
     # Launch the TRT-LLM MoE grouped GEMMs with PDL only at or below this
     # token count.
     SGLANG_TRTLLM_MOE_PDL_MAX_TOKENS = EnvInt(8192)
