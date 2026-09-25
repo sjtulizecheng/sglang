@@ -2068,26 +2068,16 @@ class DeepseekV4AttnBackend(
             pad_rows=pad_rows,
         )
 
-    def write_tail_source_kv(
-        self, *, layer, x, positions, forward_batch: ForwardBatch
-    ) -> None:
-        """Write every row's compressed KV for the source layer the tail starts at,
-        before enter_late_layer_tail; the layer's own pass inside the tail then
-        skips its compressor, also on a rank with no rows to write."""
-        if x.shape[0] > 0:
-            self.forward_low_ratio_sources(
-                layer=layer,
-                x=x,
-                q_lora=None,
-                positions=positions,
-                forward_batch=forward_batch,
-                run_indexer=False,
-            )
-        self.tail_source_kv_layer_id = layer.layer_id
-
-    def enter_late_layer_tail(self, forward_batch: ForwardBatch) -> tuple:
-        """Switch the late layers onto the tail; the return value goes back to
-        exit_late_layer_tail."""
+    def enter_late_layer_tail(
+        self,
+        forward_batch: ForwardBatch,
+        *,
+        inherit_full_state: bool = True,
+    ) -> tuple:
+        """Switch the late layers onto the tail; hand the return value back to
+        exit_late_layer_tail. The candidate-source layer published its masks over
+        the full extend, so each request's mask is cut to its tail rows. A VPP
+        continuation installs tail state directly and disables that inheritance."""
         tail_metadata = self.tail_forward_metadata
         assert tail_metadata is not None, "no tail metadata for this forward"
         saved = (
@@ -2096,25 +2086,46 @@ class DeepseekV4AttnBackend(
             get_local_dp_buffer_len(),
         )
         tail = tail_metadata.late_layer_tail
-        saved = saved + (
-            forward_batch.global_num_token_non_padded_cpu,
-            forward_batch.global_num_token_non_padded,
-            forward_batch.num_token_non_padded,
+        tail_lens_cpu = (
+            tail.local_lens_cpu
+            if tail.cp_metadata is not None
+            else tail.extend_seq_lens_cpu
         )
-        if tail.real_rows_count is not None:
-            forward_batch.global_num_token_non_padded_cpu = tail.real_rows_count
-            non_padded = forward_batch.global_num_token_non_padded
-            if non_padded is not None:
-                if self._bcg_tail_num_token_non_padded is None:
-                    self._bcg_tail_num_token_non_padded = torch.empty_like(non_padded)
-                bound = torch.clamp(
-                    non_padded,
-                    max=tail.real_rows_count,
-                    out=self._bcg_tail_num_token_non_padded,
-                )
-                forward_batch.global_num_token_non_padded = bound
-                forward_batch.num_token_non_padded = bound
+        # TODO(candidate): goes away once the source publishes its tail rows straight
+        # onto the tail metadata (publish_prefill); until then cut the full masks.
         tail_core = tail_metadata.core_attn_metadata
+        if inherit_full_state:
+            full_masks = self.forward_metadata.candidate_metadata
+            if isinstance(full_masks, CandidateMasks) and full_masks.request_masks:
+                tail_metadata.candidate_metadata = CandidateMasks(
+                    request_masks=[
+                        mask[mask.shape[0] - t :]
+                        for mask, t in zip(full_masks.request_masks, tail_lens_cpu)
+                    ]
+                )
+            # The last index-source layer before the switch published its top-k into
+            # the full metadata's buffers; the consumer layers after the switch read
+            # the tail metadata's, so carry the tail rows over (padding stays -1).
+            full_core = saved[0].core_attn_metadata
+            for ratio in tail_core.low_ratios:
+                for full_buf, tail_buf in (
+                    (
+                        full_core.sparse_page_indices(ratio),
+                        tail_core.sparse_page_indices(ratio),
+                    ),
+                    (
+                        full_core.sparse_topk_lengths(ratio),
+                        tail_core.sparse_topk_lengths(ratio),
+                    ),
+                    (
+                        full_core.sparse_raw_indices(ratio),
+                        tail_core.sparse_raw_indices(ratio),
+                    ),
+                ):
+                    if full_buf is None or tail_buf is None:
+                        continue
+                    rows = tail.real_rows(full_buf)
+                    tail_buf[: rows.shape[0]].copy_(rows)
         self.forward_metadata = tail_metadata
         if self.token_to_kv_pool.request_window is not None:
             self.token_to_kv_pool.request_window.activate(

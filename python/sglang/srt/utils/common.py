@@ -1677,43 +1677,51 @@ def make_layers(
     return modules, start_layer, end_layer
 
 
-def make_pp_layers(
+def make_layers_from_ids(
     num_hidden_layers: int,
+    layer_ids: Sequence[int],
     layer_fn: LayerFn,
     prefix: str = "",
     return_tuple: bool = False,
     offloader_kwargs: Optional[Dict[str, Any]] = None,
-    final_read: Optional[Any] = None,
-    stage_facts: Optional[Callable[[int], Sequence[Any]]] = None,
-) -> Tuple[torch.nn.Module, int, int]:
-    """Make this pipeline stage's layers, and return them with the stage's range.
+) -> torch.nn.ModuleList:
+    from sglang.srt.layers.utils import PPMissingLayer
+    from sglang.srt.utils.offloader import get_offloader
 
-    Layers outside ``[start_layer, end_layer)`` are ``PPMissingLayer`` stand-ins.
-    ``stage_facts`` is the model's shared declaration function (see make_layers).
-    """
-    parallel = get_parallel()
-    return make_layers(
-        num_hidden_layers,
-        layer_fn,
-        pp_rank=parallel.pp_rank,
-        pp_size=parallel.pp_size,
-        prefix=prefix,
-        return_tuple=return_tuple,
-        offloader_kwargs=offloader_kwargs,
-        final_read=final_read,
-        stage_facts=stage_facts,
+    owned = tuple(layer_ids)
+    if owned != tuple(sorted(set(owned))):
+        raise ValueError("pipeline layer IDs must be sorted and unique")
+    if any(layer_id < 0 or layer_id >= num_hidden_layers for layer_id in owned):
+        raise ValueError("pipeline layer ID is outside the model")
+
+    modules = [
+        PPMissingLayer(return_tuple=return_tuple) for _ in range(num_hidden_layers)
+    ]
+    wrapped = get_offloader().wrap_modules(
+        (layer_fn(idx=idx, prefix=add_prefix(idx, prefix)) for idx in owned),
+        **(offloader_kwargs or {}),
     )
+    for layer_id, layer in zip(owned, wrapped):
+        modules[layer_id] = layer
+    return torch.nn.ModuleList(modules)
 
 
-def _no_stage_facts(layer_fn: LayerFn) -> None:
-    """Stands in for the shared declaration function of a model that gives
-    none: called only if this pipeline rank's layers declare stages."""
-    module = getattr(getattr(layer_fn, "func", layer_fn), "__module__", None)
-    raise ValueError(
-        f"{module} declares stage boundaries under pipeline parallelism "
-        "without a shared declaration function: give make_layers its "
-        "stage_facts, the stages a layer declares without building it"
+def make_layers_non_pp(
+    num_hidden_layers: int,
+    layer_fn: LayerFn,
+    prefix: str = "",
+) -> torch.nn.ModuleList:
+    from sglang.srt.utils.offloader import get_offloader
+
+    layers = torch.nn.ModuleList(
+        get_offloader().wrap_modules(
+            (
+                layer_fn(idx=idx, prefix=add_prefix(idx, prefix))
+                for idx in range(num_hidden_layers)
+            )
+        )
     )
+    return layers
 
 
 def set_random_seed(seed: int) -> None:

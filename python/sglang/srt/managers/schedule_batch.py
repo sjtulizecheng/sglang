@@ -1215,9 +1215,11 @@ class Req(ReqDllmMixin):
         self.mm_token_counts_ready: bool = False
 
         # Prefix info
-        # Tokens [0, prefix_len) are already in the row, or, before allocation,
-        # on the path to last_node; the next extend starts at prefix_len.
-        self.prefix_len: int = 0
+        # The indices to kv cache for the shared prefix.
+        self.prefix_indices: torch.Tensor = torch.empty((0,), dtype=torch.int64)
+        # One-shot PP consensus cap for the next prefill admission. It keeps
+        # all physical PP ranks on the same cached-prefix boundary.
+        self.vpp_prefix_limit: Optional[int] = None
         # TODO(ispobock): rename to last_device_node
         self.last_node: Any = None
         self.last_host_node: Any = None
@@ -1773,15 +1775,8 @@ class Req(ReqDllmMixin):
             max_prefix_len = min(max_prefix_len, self.dllm_block_offset)
         if self.return_logprob and self.logprob_start_len >= 0:
             max_prefix_len = min(max_prefix_len, self.logprob_start_len)
-        if self.is_dllm():
-            # Appended masks and a partial prompt/output block are not reusable
-            # KV: bidirectional attention depends on the rest of that block.
-            # Bound the lookup by real tokens, even if another cached prompt
-            # happens to contain the same token IDs as our synthetic masks.
-            block_size = self.dllm_config.block_size
-            committed_len = len(self.origin_input_ids) + len(self.output_ids)
-            max_prefix_len = min(max_prefix_len, committed_len)
-            max_prefix_len = max_prefix_len // block_size * block_size
+        if self.vpp_prefix_limit is not None:
+            max_prefix_len = min(max_prefix_len, self.vpp_prefix_limit)
         return max(max_prefix_len, 0)
 
     # Based on https://github.com/vllm-project/vllm/blob/7a64d24aad69e4d2548aa0bf528d9fe63428ab01/vllm/transformers_utils/detokenizer.py#L194-L313
@@ -2485,6 +2480,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
     chunked_req: Optional[Req] = None
     chunked_req_next_prompt_token: Optional[int] = None
     contains_last_prefill_chunk: bool = True
+    disagg_prefill_chunk_end_by_rid: Optional[Dict[str, int]] = None
 
     # Tracks process_prefill_chunk() on the original scheduler batch only.
     prefill_chunk_processed: bool = False
@@ -4042,6 +4038,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             after_idle_gap=self.after_idle_gap,
             split_prefill_start=self.split_prefill_start,
             extend_num_tokens=self.extend_num_tokens,
+            disagg_prefill_chunk_end_by_rid=self.disagg_prefill_chunk_end_by_rid,
         )
 
     def _swa_eviction_trigger(self, sliding_window_size: int, eviction_interval: int):

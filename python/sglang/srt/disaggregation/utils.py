@@ -1130,10 +1130,13 @@ def build_kv_layer_ids(
     Returns [] for pools that cannot report ids, leaving the peers on positional
     pairing.
     """
+    from sglang.srt.mem_cache.deepseek_v4_memory_pool import (
+        DeepSeekV4TokenToKVPool,
+    )
     from sglang.srt.mem_cache.memory_pool import HybridLinearKVPool
     from sglang.srt.mem_cache.minimax_m3_nvfp4_pool import MiniMaxM3Nvfp4KVPool
 
-    if not isinstance(token_to_kv_pool, (HybridLinearKVPool, MiniMaxM3Nvfp4KVPool)):
+    if not isinstance(token_to_kv_pool, (HybridLinearKVPool, DeepSeekV4TokenToKVPool)):
         return []
     layer_ids = token_to_kv_pool.get_kv_layer_ids()
     if draft_token_to_kv_pool is None:
@@ -1545,8 +1548,18 @@ def setup_state_kv_args(
         # DeepSeekV4TokenToKVPool inherits BaseSWAKVPool; its heterogeneous
         # state list is described per-entry via get_state_buf_infos.
         if isinstance(token_to_kv_pool, BaseSWAKVPool):
+            layer_ids = (
+                token_to_kv_pool.get_state_layer_ids()
+                if isinstance(token_to_kv_pool, DeepSeekV4TokenToKVPool)
+                else None
+            )
             append_state_component(
-                kv_args, StateType.SWA, data_ptrs, data_lens, item_lens
+                kv_args,
+                StateType.SWA,
+                data_ptrs,
+                data_lens,
+                item_lens,
+                layer_ids=layer_ids,
             )
             if isinstance(token_to_kv_pool, SWAKVPool) and isinstance(
                 token_to_kv_pool.swa_kv_pool, MHATokenToKVPool
@@ -1583,6 +1596,7 @@ def setup_state_kv_args(
                         ring_ptrs,
                         ring_lens,
                         ring_item_lens,
+                        layer_ids=token_to_kv_pool.get_unified_swa_ring_layer_ids(),
                     )
             if hasattr(token_to_kv_pool, "get_request_state_buf_infos"):
                 c128_ptrs, c128_lens, c128_item_lens = (
@@ -1595,6 +1609,7 @@ def setup_state_kv_args(
                         c128_ptrs,
                         c128_lens,
                         c128_item_lens,
+                        layer_ids=token_to_kv_pool.get_c128_state_layer_ids(),
                     )
         elif isinstance(token_to_kv_pool, HybridLinearKVPool):
             dim = (

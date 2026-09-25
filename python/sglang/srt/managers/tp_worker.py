@@ -677,20 +677,11 @@ class TpModelWorker(BaseTpWorker):
                 pp_proxy_tensors=pp_proxy_tensors,
             )
             logits_output, can_run_cuda_graph = out.logits_output, out.can_run_graph
-            if folded is not None:
-                from sglang.srt.model_executor.encoder_swa_replay import (
-                    drop_folded_rows,
-                )
-
-                tail = self.model_runner.attn_backend.tail_forward_metadata
-                drop_folded_rows(
-                    logits_output=logits_output,
-                    folded=folded,
-                    tail_lens=(
-                        None
-                        if tail is None
-                        else tail.late_layer_tail.extend_seq_lens_cpu
-                    ),
+            if isinstance(logits_output, PPProxyTensors):
+                return GenerationBatchResult(
+                    pp_hidden_states_proxy_tensors=logits_output,
+                    can_run_cuda_graph=can_run_cuda_graph,
+                    expert_distribution_metrics=out.expert_distribution_metrics,
                 )
             batch_result = GenerationBatchResult(
                 logits_output=logits_output,
