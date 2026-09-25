@@ -4456,7 +4456,7 @@ class DeepseekV4Model(nn.Module):
 
         candidate_count = int(tensors.get("vpp_candidate_count", 0))
         if candidate_count:
-            from sglang.srt.layers.attention.dsv4.candidate_torch import (
+            from sglang.srt.layers.attention.dsv4.candidate_indexer import (
                 CandidateMasks,
             )
 
@@ -4515,7 +4515,7 @@ class DeepseekV4Model(nn.Module):
             if value is not None:
                 tensors[f"vpp_index_{name}"] = value
 
-        from sglang.srt.layers.attention.dsv4.candidate_torch import CandidateMasks
+        from sglang.srt.layers.attention.dsv4.candidate_indexer import CandidateMasks
 
         candidate = metadata.candidate_metadata
         if isinstance(candidate, CandidateMasks):
