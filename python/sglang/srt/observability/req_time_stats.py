@@ -374,13 +374,8 @@ class APIServerReqTimeStats(ReqTimeStatsBase):
     response_sent_to_client_time: float = 0.0
 
     def __getstate__(self) -> object:
-        state = {}
-        # send to DP controller or Scheduler
-        # If necessary, can propagate the timestamp here, for example:
-        # state = {
-        #    "created_time": self.created_time,
-        #    "api_server_dispatch_time": self.api_server_dispatch_time,
-        # }
+        # Preserve API ingress for E2E deadline scheduling, including tokenization.
+        state = {"created_time": self.created_time}
         state.update(super().__getstate__())
         return state
 

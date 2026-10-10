@@ -179,6 +179,7 @@ from sglang.srt.managers.overlap_utils import (
     decide_needs_cpu_seq_lens,
     resolve_forward_inputs,
 )
+from sglang.srt.managers.pd_slo_controller import PDSLOController, SLORequest
 from sglang.srt.managers.prefill_delayer import (
     PrefillDelayer,
     PrefillDelayerSinglePassExecutor,
@@ -1139,6 +1140,17 @@ class Scheduler(
         self.chunked_prefill_size = get_schedule().chunked_prefill_size
         self.prefill_decode_interval = get_schedule().prefill_decode_interval
         self._prefill_decode_interval_remaining = 0
+        self.pd_slo_controller = (
+            PDSLOController(get_schedule().pd_slo_ms / 1000)
+            if get_schedule().pd_slo_ms
+            else None
+        )
+        if self.pd_slo_controller and (
+            not is_cuda()
+            or not self.is_generation
+            or get_exec().dllm.dllm_algorithm is not None
+        ):
+            raise ValueError("--pd-slo-ms requires CUDA autoregressive generation")
         uses_transformers_backend = (
             get_resolved_model_impl(self.model_config) == ModelImpl.TRANSFORMERS
         )
@@ -1176,6 +1188,8 @@ class Scheduler(
                 self.enable_dynamic_chunking = False
 
     def _should_defer_prefill(self, running_batch: ScheduleBatch) -> bool:
+        if getattr(self, "pd_slo_controller", None) is not None:
+            return self._pd_slo_should_decode(running_batch)
         if self._prefill_decode_interval_remaining == 0:
             return False
 
@@ -1193,6 +1207,55 @@ class Scheduler(
         self._prefill_decode_interval_remaining -= 1
         return True
 
+    def _pd_slo_should_decode(self, running_batch: ScheduleBatch) -> bool:
+        from sglang.srt.managers.schedule_policy import match_prefix_for_req
+
+        controller = self.pd_slo_controller
+        live = [r for r in running_batch.reqs if not r.finished()]
+        slots = self.get_num_allocatable_reqs(len(live))
+        if self.server_args.prefill_max_requests is not None:
+            slots = min(slots, self.server_args.prefill_max_requests)
+        pending = [self.chunked_req] if self.chunked_req is not None else []
+        pending += self.waiting_queue[: max(0, slots - len(pending))]
+        if not live or not pending or running_batch.is_prefill_only:
+            controller.defer_started = None
+            if not live or running_batch.is_prefill_only:
+                controller.decode_credit = controller.target_decode_share = 0.0
+            return False
+        now = time.perf_counter()
+
+        def request_state(req):
+            # API ingress survives requeues; local receive time is a fallback
+            # for callers that do not provide API timing (e.g. Engine).
+            arrival = req.time_stats.created_time or req.time_stats.scheduler_recv_time
+            return SLORequest(
+                age=max(0, now - arrival),
+                remaining=controller.remaining_tokens(
+                    len(req.output_ids), req.sampling_params.max_new_tokens
+                ),
+            )
+
+        budget = self.chunked_prefill_size or self.max_prefill_tokens
+        tokens = 0
+        admitted = []
+        for req in pending:
+            if req is self.chunked_req:
+                uncached = len(req.full_untruncated_fill_ids) - len(req.prefix_indices)
+            else:
+                match_prefix_for_req(self.tree_cache, req, include_req=True)
+                uncached = (
+                    len(req.origin_input_ids)
+                    + len(req.output_ids)
+                    - req.num_matched_prefix_tokens
+                )
+            charge = max(1, uncached)
+            admitted.append(request_state(req))
+            tokens += min(charge, budget - tokens)
+            if tokens >= budget:
+                break
+        return controller.should_decode(
+            [request_state(r) for r in live], admitted, tokens, now
+        )
 
     def _arm_prefill_decode_interval(self, batch: Optional[ScheduleBatch]) -> None:
         if self.prefill_decode_interval == 0 or batch is None:
@@ -3608,6 +3671,17 @@ class Scheduler(
         if self.scripted_scheduler_hook is not None:
             self.scripted_scheduler_hook.on_run_batch(batch)
 
+        if getattr(self, "pd_slo_controller", None) is not None:
+            timing_stream = (
+                self.forward_stream
+                if self.enable_overlap
+                else self.device_module.current_stream()
+            )
+            batch.pd_slo_timing = (
+                self.device_module.Event(enable_timing=True),
+                self.device_module.Event(enable_timing=True),
+            )
+            batch.pd_slo_timing[0].record(stream=timing_stream)
 
         # Whether to run the profiler
         self.profiler_manager._profile_batch_predicate(batch)
@@ -3811,6 +3885,8 @@ class Scheduler(
 
         self._maybe_report_active_ranks()
 
+        if getattr(self, "pd_slo_controller", None) is not None:
+            batch.pd_slo_timing[1].record(stream=timing_stream)
 
         return ret
 
@@ -3905,6 +3981,8 @@ class Scheduler(
             self.batch_result_processor.process_batch_result_idle(batch, result)
 
         self._record_step_counters(batch, result)
+        if getattr(self, "pd_slo_controller", None) is not None:
+            self._pd_slo_observe_result(batch)
 
         self.metrics_reporter.log_batch_result_stats(batch, result)
 
@@ -3916,6 +3994,26 @@ class Scheduler(
         self.maybe_send_health_check_signal()
         self.metrics_reporter.update_device_timer()
 
+    def _pd_slo_observe_result(self, batch: ScheduleBatch):
+        controller = self.pd_slo_controller
+        timing = batch.pd_slo_timing
+        # The ordinary result path already waits for sampled tokens. Never add
+        # a device-wide synchronization just to obtain a scheduling estimate.
+        if timing is not None and timing[1].query():
+            prefill = batch.forward_mode.is_extend_without_speculative()
+            controller.observe_forward(
+                prefill=prefill,
+                tokens=batch.extend_num_tokens if prefill else len(batch.reqs),
+                batch_size=len(batch.reqs),
+                seconds=timing[0].elapsed_time(timing[1]) / 1000,
+            )
+        for req in batch.reqs:
+            if req.finished() and not req.pd_slo_observed_completion:
+                req.pd_slo_observed_completion = True
+                if not isinstance(req.finished_reason, FINISH_ABORT):
+                    controller.observe_completion(
+                        len(req.output_ids), req.sampling_params.max_new_tokens
+                    )
 
     def _record_step_counters(
         self, batch: ScheduleBatch, result: GenerationBatchResult
@@ -4254,6 +4352,8 @@ class Scheduler(
         )
         ret["startup_time"] = self.startup_time
         ret["effective_max_running_requests_per_dp"] = self.max_running_requests
+        if self.pd_slo_controller is not None:
+            ret["pd_slo_stats"] = self.pd_slo_controller.stats()
 
         if get_exec().moe.elastic_ep_backend is not None:
             from sglang.srt.elastic_ep.elastic_ep import ElasticEPStateManager

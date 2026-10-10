@@ -42,6 +42,29 @@ _mock_device.start()
 
 
 class TestPrepareServerArgs(CustomTestCase):
+    def test_pd_slo_args(self):
+        self.assertEqual(ServerArgs(model_path="dummy", pd_slo_ms=5000).pd_slo_ms, 5000)
+        for value in [-1, float("inf"), float("nan")]:
+            with (
+                self.subTest(value=value),
+                self.assertRaisesRegex(ValueError, "--pd-slo-ms"),
+            ):
+                ServerArgs(model_path="dummy", pd_slo_ms=value)
+        for conflict in [
+            {"tp_size": 2},
+            {"pp_size": 2},
+            {"dp_size": 2},
+            {"disaggregation_mode": "prefill"},
+            {"enable_mixed_chunk": True},
+            {"prefill_decode_interval": 1},
+            {"enable_prefill_delayer": True},
+            {"speculative_algorithm": "EAGLE"},
+        ]:
+            with (
+                self.subTest(conflict=conflict),
+                self.assertRaisesRegex(ValueError, "--pd-slo-ms"),
+            ):
+                ServerArgs(model_path="dummy", pd_slo_ms=5000, **conflict)
 
     def test_prefill_decode_interval(self):
         args = ServerArgs(model_path="dummy", prefill_decode_interval=16)

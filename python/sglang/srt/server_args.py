@@ -799,6 +799,11 @@ class ServerArgs:
         "The number of decode rounds to run after a prefill batch before scheduling the next prefill. In data-parallel attention mode, the interval is synchronized across all DP ranks. Set to 0 to disable.",
         NS("schedule"),
     ] = 0
+    pd_slo_ms: A[
+        float,
+        "Experimental colocated prefill/decode time sharing against this E2E SLO in milliseconds. 0 disables it. Currently supports single-GPU autoregressive generation without mixed chunk or a fixed decode interval.",
+        NS("schedule"),
+    ] = 0.0
     enable_dynamic_chunking: A[
         bool,
         "Enable dynamic chunk size adjustment for pipeline parallelism. When enabled, chunk sizes are dynamically calculated based on fitted function to maintain consistent execution time across chunks.",
@@ -8101,6 +8106,23 @@ class ServerArgs:
     def _validate_prefill_decode_interval(self):
         if self.prefill_decode_interval < 0:
             raise ValueError("--prefill-decode-interval must be non-negative.")
+        if not math.isfinite(self.pd_slo_ms) or self.pd_slo_ms < 0:
+            raise ValueError("--pd-slo-ms must be finite and non-negative.")
+        if self.pd_slo_ms and (
+            self.tp_size != 1
+            or self.pp_size != 1
+            or self.dp_size != 1
+            or self.disaggregation_mode != "null"
+            or self.speculative_algorithm is not None
+            or self.enable_mixed_chunk
+            or self.enable_prefill_delayer
+            or self.prefill_decode_interval
+            or self.enable_pdmux
+        ):
+            raise ValueError(
+                "--pd-slo-ms requires single-GPU colocated non-speculative generation "
+                "without mixed chunk, prefill delayer, fixed decode interval or PD multiplexing."
+            )
 
     def _handle_other_validations(self):
 

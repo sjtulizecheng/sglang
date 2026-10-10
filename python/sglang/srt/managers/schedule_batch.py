@@ -1156,6 +1156,7 @@ class Req(ReqDllmMixin):
 
         # Snapshot of the scheduler prefill-token counter taken at waiting_queue entry; used by HRRN aging.
         self.arrival_processed_tokens: int = 0
+        self.pd_slo_observed_completion: bool = False
 
     @property
     def seqlen(self) -> int:
@@ -1982,6 +1983,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
     prefill_stats: Optional[PrefillStats] = None
     forward_iter: Optional[int] = None
     launch_ts: Optional[float] = None
+    pd_slo_timing: Optional[Tuple[Any, Any]] = None
 
     # === GPU tensors crossing to ForwardBatch (clone targets for stream isolation) ===
     # Batched arguments to model runner
@@ -3204,6 +3206,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             fpm_start_time=self.fpm_start_time,
             forward_iter=self.forward_iter,
             launch_ts=self.launch_ts,
+            pd_slo_timing=self.pd_slo_timing,
             extend_num_tokens=self.extend_num_tokens,
         )
 
