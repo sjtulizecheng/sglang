@@ -828,6 +828,7 @@ class ServerArgs:
                 "lof",
                 "priority",
                 "routing-key",
+                "hrrn",
             ],
         ),
         NS("schedule"),
@@ -8089,6 +8090,7 @@ class ServerArgs:
                 f"--asr-max-concurrent-sessions must be positive "
                 f"(got {self.asr_max_concurrent_sessions})."
             )
+
 
     def _handle_other_validations(self):
 
