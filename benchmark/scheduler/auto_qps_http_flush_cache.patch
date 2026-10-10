@@ -1,0 +1,120 @@
+--- a/scripts/auto_qps.py
++++ b/scripts/auto_qps.py
+@@ -19,6 +19,7 @@
+ import time
+ from datetime import datetime, timezone
+ from urllib.parse import urlsplit
++from urllib.request import ProxyHandler, Request, build_opener
+ import uuid
+
+
+@@ -178,6 +179,24 @@
+     if args.flush_cache:
+         command.append("--flush-cache")
+     return command
++
++
++def flush_http_cache(base_url, timeout=30):
++    """Start each HTTP trial from an empty server cache, including repeats."""
++    headers = {}
++    if os.getenv("OPENAI_API_KEY"):
++        headers["Authorization"] = "Bearer " + os.environ["OPENAI_API_KEY"]
++    opener = build_opener(ProxyHandler({}))
++    with opener.open(Request(base_url + "/v1/loads", headers=headers), timeout=timeout) as response:
++        loads = json.loads(response.read())["loads"]
++    if any(load["num_running_reqs"] or load["num_waiting_reqs"] for load in loads):
++        raise RuntimeError("Cannot flush cache while model requests are still running or queued")
++    with opener.open(Request(base_url + "/flush_cache", headers=headers, method="POST"), timeout=timeout) as response:
++        if response.status != 200:
++            raise RuntimeError("Cache flush did not return HTTP 200")
++        message = response.read().decode()
++    return {"completed_at": datetime.now(timezone.utc).isoformat(),
++            "status": 200, "response": message}
+
+
+ def stop_child(process):
+@@ -411,8 +430,6 @@
+     if args.runner == "http":
+         if not args.disable_stream:
+             parser.error("--runner http currently requires --disable-stream (E2E SLO only)")
+-        if args.flush_cache:
+-            parser.error("--flush-cache is only supported by --runner sglang")
+     if not args.min_qps <= args.start_qps <= args.max_qps:
+         parser.error("require min-qps <= start-qps <= max-qps")
+     if args.growth_factor <= 1:
+@@ -474,6 +491,9 @@
+         save()
+         print(f"[{trial}/{args.max_trials}] target={qps:.4g} QPS, repeat={repeat}/{args.repeats}", flush=True)
+         try:
++            if args.runner == "http" and args.flush_cache:
++                row["cache_flush"] = flush_http_cache(args.base_url)
++                save()
+             run_child(command, log_path, args.trial_timeout)
+             row.update(assess_result(read_result(result_path), qps, args))
+             row["status"] = "met" if row["met"] else "unmet"
+--- a/tests/test_auto_qps.py
++++ b/tests/test_auto_qps.py
+@@ -9,6 +9,7 @@
+ import tempfile
+ from types import SimpleNamespace
+ import unittest
++from unittest.mock import patch
+
+ ROOT = Path(__file__).resolve().parents[1]
+ sys.path.insert(0, str(ROOT / "scripts"))
+@@ -321,5 +322,55 @@
+         self.assertFalse((self.directory / "reports").exists())
+
+
++class HttpCacheTests(unittest.TestCase):
++    def run_with_flush(self, directory, flush, run_child):
++        cases = directory / "cases.jsonl"
++        cases.write_text("\n".join(json.dumps({
++            "messages": [{"role": "user", "content": str(i)}], "max_tokens": 16
++        }) for i in range(100)) + "\n")
++        with patch.object(auto_qps, "flush_http_cache", side_effect=flush), patch.object(
++            auto_qps, "run_child", side_effect=run_child
++        ) as runner:
++            result = auto_qps.main([
++                "--runner", "http", "--disable-stream", "--flush-cache",
++                "--base-url", "http://127.0.0.1:1", "--served-model", "test",
++                "--cases", str(cases), "--report-dir", str(directory / "reports"),
++                "--num-prompts", "100", "--start-qps", "1", "--min-qps", "1",
++                "--max-qps", "1", "--repeats", "2", "--cooldown-seconds", "0",
++                "--slo-p95-e2e-ms", "2000",
++            ])
++        return result, runner
++
++    def test_each_http_repeat_flushes_before_requests(self):
++        actions = []
++        def flush(base_url):
++            actions.append("flush")
++            return {"status": 200}
++        def run_child(command, log_path, timeout):
++            self.assertEqual(actions[-1], "flush")
++            actions.append("requests")
++            path = Path(command[command.index("--output-file") + 1])
++            path.write_text(json.dumps(benchmark_result()))
++        with tempfile.TemporaryDirectory() as tmp:
++            directory = Path(tmp)
++            result, _ = self.run_with_flush(directory, flush, run_child)
++            self.assertEqual(result, 0)
++            self.assertEqual(actions, ["flush", "requests", "flush", "requests"])
++            summary = json.loads(next((directory / "reports").glob("*/summary.json")).read_text())
++            self.assertTrue(all(row["cache_flush"]["status"] == 200 for row in summary["history"]))
++
++    def test_failed_flush_prevents_benchmark_and_slo_acceptance(self):
++        def flush(base_url):
++            raise RuntimeError("flush refused while server is busy")
++        with tempfile.TemporaryDirectory() as tmp:
++            directory = Path(tmp)
++            result, runner = self.run_with_flush(directory, flush, lambda *args: None)
++            self.assertEqual(result, 1)
++            runner.assert_not_called()
++            summary = json.loads(next((directory / "reports").glob("*/summary.json")).read_text())
++            self.assertEqual(summary["status"], "error")
++            self.assertIsNone(summary["best_confirmed"])
++
++
+ if __name__ == "__main__":
+     unittest.main()

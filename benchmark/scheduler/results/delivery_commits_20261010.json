@@ -1,0 +1,174 @@
+{
+  "date": "2026-10-10",
+  "repository": "git@github.com:sjtulizecheng/sglang.git",
+  "branch": "5000pro_glm4.7_flash",
+  "community_base": "29481685462732237d80d86076d6563e1f658102",
+  "commit_identity": {
+    "name": "sjtushenhai",
+    "email": "1730536718@qq.com"
+  },
+  "excluded_internal_commits_count": 14,
+  "internal_overlays_included": false,
+  "runtime_source_hashes": {
+    "python/sglang/kernels/ops/attention/flash_attn/cute/flash_fwd.py": "c6c16a77d253724d47b51da8185a196384e415e644a14e9acfa3fa9cd4846231",
+    "python/sglang/kernels/ops/attention/flash_attn/cute/flash_fwd_sm120.py": "774b74046d3dd9dcf8a1d0d780f2d1c1093f4409675fd86a6c7a42caf1903320",
+    "python/sglang/kernels/ops/attention/flash_attn/cute/interface.py": "4a760e80fca30a40f70aa0441a6f73ea324986cb34b97e8beee25eb5888e381f",
+    "python/sglang/kernels/ops/attention/flash_attn/cute/utils.py": "bc7a955f191f04e08711685667cf4030d04ea13344bf96c0769c6cb3f9960bc9",
+    "python/sglang/kernels/ops/attention/fp8_mla_decode_sm120.py": "3aae906bb6e609dcdd112c612e8559f5ede0ede867b7fe7cc7a1e9df2258e4c2",
+    "python/sglang/kernels/ops/attention/fp8_prefill_sm120.py": "1c542345bb86f35fb440212800e16c8ddff17c6b0376503a58c5c1c42502e552",
+    "python/sglang/srt/arg_groups/overrides.py": "38768fd87edac29f91fa5cf05563ebdd849a84a74f03ba9d2a69c52c56dfd574",
+    "python/sglang/srt/disaggregation/prefill.py": "07b62e0c7b322dd15fc53bbb753b101b56bdfcc110f68258cca6e81b30cd2ee8",
+    "python/sglang/srt/environ.py": "e7a0e41e326e58faa3ce2bfe4f59ec6b914d8e583c5b8a4d70f3959f4f764e29",
+    "python/sglang/srt/layers/attention/flashinfer_mla_backend.py": "a550968e74fe0e8ac68dc9b624cdf8aaa43c1ab0dbe080e06ecb6aeb5aa78a81",
+    "python/sglang/srt/layers/quantization/modelopt_quant.py": "4f8e5b22724b3747608d2368fd221d1bf6b8201fccf568173ed0a1511c275b20",
+    "python/sglang/srt/layers/quantization/nvfp4_online.py": "cb2ff346b15fa30c8e5107f69985d7df78a1b39070f426f37e82d4f6f76bcf59",
+    "python/sglang/srt/managers/pd_slo_controller.py": "6fc5014d64a63e47b90224b816a4888d0c85759ea825018c1fcb2285339920fc",
+    "python/sglang/srt/managers/schedule_batch.py": "7292039a89874bd77bb2d3b3c7b44f65ed5985e2a5d42de0d88d1fe17d89b0cb",
+    "python/sglang/srt/managers/schedule_policy.py": "513b9741956d93bbacd0cd775dd753caf84e642d677581eee472a71e878ccf43",
+    "python/sglang/srt/managers/scheduler.py": "8d23167e86e43a52b38b7ecf7a15601eabfe163c685ef52ef95d43ab2735ad0f",
+    "python/sglang/srt/model_executor/runner/base_runner.py": "300d83839cd3abc9b2e78b473a31826a365cad6842bc97dd6dec688e5393c0c0",
+    "python/sglang/srt/model_executor/runner/flashinfer_autotune.py": "124f3c81a978d54d1ba50add9ee149d432b3320626d21caf7d12c2e822112e87",
+    "python/sglang/srt/models/deepseek_common/attention_backend_handler.py": "17785c57a33d6bfab3cc57b0f94c814bb14b4644a62f88872b614090c77a82b2",
+    "python/sglang/srt/observability/req_time_stats.py": "ae6816df6f2f8f49e204ff0c4d6894e0e012a4b3314c7acd9d921ae47a4050c7",
+    "python/sglang/srt/server_args.py": "417a2e07fa03d6f7be1d94462918c2f3cc87f95901fee91ec1e52a5ea37cde89"
+  },
+  "commits": [
+    {
+      "repo": "sglang",
+      "sha": "7e9ca06d3957d62a614044f12b69d7e513e9e866",
+      "subject": "feat(quantization): support online NVFP4 MoE on SM120 CUTLASS"
+    },
+    {
+      "repo": "sglang",
+      "sha": "d03d208b7a0aa1d4836c06fb384eefece69847a7",
+      "subject": "fix(attention): make FA4 prefill compatible with SM120"
+    },
+    {
+      "repo": "sglang",
+      "sha": "574b0fd85e081d11a358b8071812afdff3de5773",
+      "subject": "perf(attention): use one-shot FA4 prefix prefill on SM120"
+    },
+    {
+      "repo": "sglang",
+      "sha": "d2c01be623db9aeda9e390d478135f22568c1356",
+      "subject": "perf(attention): decode directly from FP8 MLA KV on SM120"
+    },
+    {
+      "repo": "sglang",
+      "sha": "de701e458080a4d258ebade14ee10ba3f7f77b29",
+      "subject": "experiment(attention): preserve standalone Triton FP8 prefill prototype"
+    },
+    {
+      "repo": "sglang",
+      "sha": "591755bdc27c1df6dc6aeae1947364742915820d",
+      "subject": "experiment(moe): add opt-in SM120 NVFP4 prefill autotuning"
+    },
+    {
+      "repo": "sglang",
+      "sha": "399008c9a47613b56a073e9ccb449d48ea19e630",
+      "subject": "experiment(scheduler): add token-aged HRRN policy"
+    },
+    {
+      "repo": "sglang",
+      "sha": "4c1573d922f49667bc66494a970d22a47e032d8b",
+      "subject": "experiment(scheduler): reserve chunk budget for short prefills"
+    },
+    {
+      "repo": "sglang",
+      "sha": "a192d9bd61dde90aaea9e675afd8d885f6e63504",
+      "subject": "experiment(scheduler): add synchronized prefill decode interval"
+    },
+    {
+      "repo": "sglang",
+      "sha": "50cd79a82b94eb657dfbfe7c038c46ef6b9985f0",
+      "subject": "experiment(scheduler): add opt-in SLO-aware prefill decode sharing"
+    },
+    {
+      "repo": "sglang",
+      "sha": "bd3a3deb62f4355950e5a612f73ad5b70edf24de",
+      "subject": "test(scheduler): isolate prefill admission from distributed topology"
+    },
+    {
+      "repo": "flashinfer",
+      "sha": "30a74f3196c7c7705c1e6924dd441b2b2faed34b",
+      "subject": "feat(experimental): add SM120 FP8 MLA decode and prefill study"
+    },
+    {
+      "repo": "flashinfer",
+      "sha": "b5f4f69795c1976efb8b560e8028ba7759c93878",
+      "subject": "perf(experimental): reuse FP8 MLA scores and probabilities on SM120"
+    },
+    {
+      "repo": "flashinfer",
+      "sha": "6483a18e3a9cc1f361acaa45a1efd40badbbaf75",
+      "subject": "experiment(sm120): preserve opt-in sharded QK research"
+    },
+    {
+      "repo": "flashinfer",
+      "sha": "2d81fdc43f4d6b6dce365caa57310f524c3aa93a",
+      "subject": "perf(sm120): add fused block-scaled FP8 prefill with K16 PV"
+    },
+    {
+      "repo": "flashinfer",
+      "sha": "3e25c2fb9533843d84b0eb747563eb621304f3f0",
+      "subject": "perf(sm120): widen FP8 prefill PV to K32"
+    },
+    {
+      "repo": "flashinfer",
+      "sha": "28385bf2f0ff55c41ac2231ef822b66de43aed6c",
+      "subject": "perf(sm120): use TMA and swizzled shared storage for FP8 prefill"
+    },
+    {
+      "repo": "flashinfer",
+      "sha": "ffad90f628dc96b1a32283fcc1eaf7240c242211",
+      "subject": "perf(sm120): pack FP8 probability fragments with PRMT"
+    },
+    {
+      "repo": "flashinfer",
+      "sha": "c896ad61cbbfff907f73ce7ba035a08fe57975f3",
+      "subject": "perf(sm120): reduce FP8 value-scale division overhead"
+    },
+    {
+      "repo": "flashinfer",
+      "sha": "7cfe4cf3821de2fed7414fe936ee602935058090",
+      "subject": "perf(sm120): fuse block scales into log2 online softmax"
+    },
+    {
+      "repo": "flashinfer",
+      "sha": "d27368d7b6cd8f58aaf8b3f73adfde205dbd96b4",
+      "subject": "perf(sm120): prepare head-major FP8 attention temporaries"
+    },
+    {
+      "repo": "flashinfer",
+      "sha": "f05215d47a4208011553fe5a93af0725d8bfd6fa",
+      "subject": "perf(sm120): avoid Stream-K overhead for short FP8 projections"
+    },
+    {
+      "repo": "flashinfer",
+      "sha": "438ee55eecc598a842178f122429a8c3d05a7b10",
+      "subject": "perf(sm120): skip interior causal masks and schedule heavy tiles first"
+    },
+    {
+      "repo": "flashinfer",
+      "sha": "be72aff0fb4d2649cc0e3cec279c7b4aab871949",
+      "subject": "docs(sm120): record per-item commits and verified throughput evidence"
+    },
+    {
+      "repo": "flashinfer",
+      "sha": "f9a2ce5acf8ea565311238c7a8c991072c9ff010",
+      "subject": "docs(sm120): scope evidence to the historical serving baseline"
+    }
+  ],
+  "checks": {
+    "cpu_passed": 150,
+    "cpu_skipped": 1,
+    "subtests_passed": 52,
+    "same_patch_id_commits": 11,
+    "test_registry": "passed",
+    "package_test_locations": "passed",
+    "experimental_imports_and_prefill_hook": "passed",
+    "gpu_or_http_rerun": false,
+    "performance_verified_on_this_base": false
+  },
+  "historical_benchmark_note": "The 51.05%-51.99% throughput gains were measured in the previous combined environment, which included internal overlays now excluded from publication."
+}
