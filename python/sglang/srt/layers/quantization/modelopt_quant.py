@@ -1993,11 +1993,15 @@ class ModelOptNvFp4FusedMoEMethod(FusedMoEMethodBase):
     @property
     def supports_nvfp4_online_moe(self) -> bool:
         a2a_backend = get_moe_a2a_backend()
-        return self.enable_flashinfer_trtllm_moe or (
-            self.enable_flashinfer_cutedsl_moe
-            and (
-                a2a_backend.is_flashinfer()
-                or (a2a_backend.is_deepep() and get_deepep_mode().is_low_latency())
+        return (
+            self.enable_flashinfer_trtllm_moe
+            or self.enable_flashinfer_cutlass_moe
+            or (
+                self.enable_flashinfer_cutedsl_moe
+                and (
+                    a2a_backend.is_flashinfer()
+                    or (a2a_backend.is_deepep() and get_deepep_mode().is_low_latency())
+                )
             )
         )
 
@@ -2045,7 +2049,7 @@ class ModelOptNvFp4FusedMoEMethod(FusedMoEMethodBase):
             if not self.supports_nvfp4_online_moe:
                 raise ValueError(
                     "--quantization nvfp4_online supports flashinfer_trtllm, "
-                    "flashinfer_trtllm_routed, or flashinfer_cutedsl with "
+                    "flashinfer_trtllm_routed, flashinfer_cutlass, or flashinfer_cutedsl with "
                     "FlashInfer A2A or DeepEP low_latency."
                 )
 

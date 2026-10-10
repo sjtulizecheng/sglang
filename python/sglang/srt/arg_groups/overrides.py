@@ -2325,21 +2325,23 @@ def _moe_runner_backend_quant_constraints(view: Any) -> dict:
     field) stay in the handler."""
     moe_runner_backend = view.moe_runner_backend
     if view.quantization == "nvfp4_online":
-        if not is_sm100_supported():
+        if is_sm100_supported():
+            online_backends = ["flashinfer_trtllm", "flashinfer_trtllm_routed"]
+        elif is_sm120_supported():
+            # TRTLLM-gen MoE kernels target SM100. SM120 has a separate
+            # CUTLASS implementation with the serialized ModelOpt FP4 layout.
+            online_backends = ["flashinfer_cutlass"]
+        else:
             raise ValueError(
                 "--quantization nvfp4_online is supported only on "
-                "NVIDIA Blackwell SM100/SM103 GPUs."
+                "NVIDIA Blackwell SM100/SM103 or SM120/SM121 GPUs."
             )
         if moe_runner_backend == "auto":
-            moe_runner_backend = "flashinfer_trtllm"
-        elif moe_runner_backend not in [
-            "flashinfer_trtllm",
-            "flashinfer_trtllm_routed",
-        ]:
+            moe_runner_backend = online_backends[0]
+        elif moe_runner_backend not in online_backends:
             raise ValueError(
-                "--quantization nvfp4_online supports only "
-                "--moe-runner-backend flashinfer_trtllm or "
-                "flashinfer_trtllm_routed."
+                "--quantization nvfp4_online on this GPU requires "
+                f"--moe-runner-backend {' or '.join(online_backends)}."
             )
     # Ascend runs MXFP8 MoE on the Ascend runner; every backend selected below is
     # CUDA/ROCm-only. Forcing one here would not merely pick the wrong runner:

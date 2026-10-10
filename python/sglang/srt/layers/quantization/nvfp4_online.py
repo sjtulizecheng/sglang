@@ -80,8 +80,9 @@ class NvFp4OnlineConfig(ModelOptQuantConfig):
             packed_modules_mapping=packed_modules_mapping or {},
         )
         self.fp4_ignored_layers = fp4_ignored_layers
-        # Weights use static NVFP4 scales, while FlashInfer computes activation
-        # FP32 scales dynamically per token at runtime.
+        # TRTLLM uses dynamic per-token FP32 activation scales. The SM120
+        # CUTLASS method selects block-dynamic scales with unit global scales
+        # below; its fused API does not accept per-token global scales.
         self.use_per_token_activation = True
         self.is_checkpoint_fp8_serialized = is_checkpoint_fp8_serialized
         self.is_fp4_experts = False
@@ -168,9 +169,11 @@ class ModelOptNvFp4OnlineFusedMoEMethod(ModelOptNvFp4FusedMoEMethod):
         if not self.supports_nvfp4_online_moe:
             raise ValueError(
                 "--quantization nvfp4_online supports flashinfer_trtllm, "
-                "flashinfer_trtllm_routed, or flashinfer_cutedsl with "
+                "flashinfer_trtllm_routed, flashinfer_cutlass, or flashinfer_cutedsl with "
                 "FlashInfer A2A or DeepEP low_latency."
             )
+        if self.enable_flashinfer_cutlass_moe:
+            self.quant_config.use_per_token_activation = False
 
     @staticmethod
     def _quantize_weight_nvfp4(

@@ -1598,6 +1598,53 @@ class TestGoldenModelOverrides(_IsolatedPublish):
             )
         self.assertEqual(_moe_runner_backend_quant_constraints(_view()), {})
 
+    def test_online_nvfp4_uses_gpu_specific_moe_kernels(self):
+        from sglang.srt.arg_groups.overrides import (
+            ResolvedView,
+            _moe_runner_backend_quant_constraints,
+        )
+
+        def resolve(backend):
+            return _moe_runner_backend_quant_constraints(
+                ResolvedView(
+                    SimpleNamespace(
+                        quantization="nvfp4_online", moe_runner_backend=backend
+                    )
+                )
+            )
+
+        with (
+            patch.object(overrides_module, "is_sm100_supported", return_value=False),
+            patch.object(overrides_module, "is_sm120_supported", return_value=True),
+        ):
+            self.assertEqual(
+                resolve("auto"), {"moe_runner_backend": "flashinfer_cutlass"}
+            )
+            self.assertEqual(resolve("flashinfer_cutlass"), {})
+            for backend in ["flashinfer_trtllm", "flashinfer_trtllm_routed", "triton"]:
+                with self.subTest(backend=backend), self.assertRaisesRegex(
+                    ValueError, "flashinfer_cutlass"
+                ):
+                    resolve(backend)
+
+        with (
+            patch.object(overrides_module, "is_sm100_supported", return_value=True),
+            patch.object(overrides_module, "is_sm120_supported", return_value=False),
+        ):
+            self.assertEqual(
+                resolve("auto"), {"moe_runner_backend": "flashinfer_trtllm"}
+            )
+            self.assertEqual(resolve("flashinfer_trtllm_routed"), {})
+            with self.assertRaisesRegex(ValueError, "flashinfer_trtllm"):
+                resolve("flashinfer_cutlass")
+
+        with (
+            patch.object(overrides_module, "is_sm100_supported", return_value=False),
+            patch.object(overrides_module, "is_sm120_supported", return_value=False),
+        ):
+            with self.assertRaisesRegex(ValueError, "Blackwell"):
+                resolve("auto")
+
     def test_cutlass_moe_env_override_pass(self):
         from sglang.srt.arg_groups.overrides import (
             ResolvedView,
