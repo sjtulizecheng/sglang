@@ -15,6 +15,7 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     IncLockRefResult,
 )
 from sglang.srt.mem_cache.radix_cache import RadixCache
+from sglang.srt.runtime_context import get_parallel
 from sglang.srt.server_args import ServerArgs, set_global_server_args_for_scheduler
 from sglang.srt.utils.common import Range
 from sglang.test.ci.ci_register import (
@@ -46,6 +47,8 @@ class _RecordingDelayer:
 class TestPrefillAdder(CustomTestCase):
     def setUp(self):
         set_global_server_args_for_scheduler(ServerArgs(model_path="dummy"))
+        # Admission tests have no distributed process group; pin the local topology.
+        self.enterContext(get_parallel().override(attn_cp_size=1))
         self.mock_tree_cache = self.create_tree_cache()
         self.mock_token_allocator = self.create_token_allocator()
 
