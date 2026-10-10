@@ -14,9 +14,8 @@ from sglang.kernels.ops.attention.flash_attn.cute.flash_fwd import (
 
 
 class FlashAttentionForwardSm120(FlashAttentionForwardSm80):
-    # Keep arch = 80 to use CpAsync code paths (no TMA for output).
-    # The compilation target is determined by the GPU at compile time, not this field.
-    arch = 80
+    # The inherited SM80 implementation explicitly uses cp.async (no TMA
+    # output). Base.__init__ records the physical compilation target in arch.
 
     @staticmethod
     def can_implement(

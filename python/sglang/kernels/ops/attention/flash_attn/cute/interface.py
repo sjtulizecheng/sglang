@@ -628,7 +628,12 @@ def _flash_attn_fwd(
             # SM120 tile sizes tuned for 99 KB SMEM capacity:
             # D<=64:  128x128 → 48 KB (good occupancy)
             # D>64:   128x64  → 64 KB (128x128 would use 96 KB, hurting occupancy)
-            if head_dim <= 64:
+            if max(head_dim, head_dim_v) > 128:
+                # GLM MLA expands Q/K/V to head_dim=256. A 128x64 tile
+                # requires 128 KiB for Q+K+V and cannot launch on SM120.
+                # 64x64 uses 96 KiB at D=256, within the 99 KiB limit.
+                fwd_cfg = FwdConfig(64, 64, True, True)
+            elif head_dim <= 64:
                 fwd_cfg = FwdConfig(128, 128, True, True)
             else:
                 fwd_cfg = FwdConfig(128, 64, True, True)

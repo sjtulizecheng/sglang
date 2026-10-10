@@ -18,6 +18,18 @@ from cutlass.cutlass_dsl import T, dsl_user_op
 
 _MIXER_ATTRS = ("__vec_size__",)
 
+# The NVVM Python binding belongs to the installed CuTe DSL package. CUDA
+# 12.9 can use either binding (e.g. DSL 4.6 uses the inferred-result API), so
+# the CUDA toolkit version is not a reliable discriminator.
+_FMAX_REQUIRES_RESULT_TYPE = (
+    sum(
+        p.kind
+        in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        for p in inspect.signature(nvvm.fmax).parameters.values()
+    )
+    == 3
+)
+
 
 class AuxData(NamedTuple):
     tensors: tuple | list | None = None
@@ -371,10 +383,7 @@ def fmax(
     loc=None,
     ip=None,
 ) -> Float32:
-    from cutlass import CUDA_VERSION
-
-    # * NVVM call based on nvvm version
-    if CUDA_VERSION.major == 12 and CUDA_VERSION.minor == 9:
+    if _FMAX_REQUIRES_RESULT_TYPE:
         # Old API: requires explicit result type as first positional argument
         return Float32(
             nvvm.fmax(
