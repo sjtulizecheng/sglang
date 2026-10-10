@@ -12,7 +12,11 @@ from sglang.srt.models.deepseek_common.attention_forward_methods.forward_methods
 )
 from sglang.srt.models.deepseek_common.utils import _is_hip
 from sglang.srt.runtime_context import get_exec
-from sglang.srt.utils import is_sm100_or_sm110_supported, use_intel_amx_backend
+from sglang.srt.utils import (
+    is_sm100_or_sm110_supported,
+    is_sm120_supported,
+    use_intel_amx_backend,
+)
 
 MHA_ONE_SHOT_SUPPORTED_BACKENDS = ["fa3", "flashinfer", "flashmla"]
 
@@ -137,10 +141,21 @@ def handle_attention_cutlass_mla(attn, forward_batch):
 
 def handle_attention_fa4(attn, forward_batch):
     # FA4 absorbed MLA feeds q_nope through the qv argument, which
-    # flash_attn.cute only implements on SM100/SM110 (not SM120); keep the
-    # pre-existing MHA chunked-KV path elsewhere. Deterministic inference
-    # requires MLA and rejects fa4 on other archs at startup (server_args).
+    # flash_attn.cute only implements on SM100/SM110 (not SM120).
+    # SM120 does support ordinary MHA with unequal Q/K lengths. When the
+    # prefix and new KV fit together, one causal call avoids separate prefix
+    # attention, LSE output and merging. Keep chunked KV for larger batches.
+    # Deterministic inference requires MLA and rejects fa4 on these other
+    # architectures at startup (server_args).
     if not is_sm100_or_sm110_supported():
+        if (
+            is_sm120_supported()
+            and forward_batch.forward_mode.is_extend_without_speculative()
+            and forward_batch.seq_lens_cpu is not None
+            and sum(forward_batch.seq_lens_cpu)
+            <= forward_batch.get_max_chunk_capacity()
+        ):
+            return AttnForwardMethod.MHA_ONE_SHOT
         return AttnForwardMethod.MHA_CHUNKED_KV
     if get_exec().deterministic.enable_deterministic_inference:
         return _dispatch_mla_subtype(attn, forward_batch)
