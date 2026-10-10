@@ -42,6 +42,7 @@ from sglang.srt.model_executor.forward_batch_info import (
 )
 from sglang.srt.model_executor.forward_context import ForwardContext, forward_context
 from sglang.srt.model_executor.runner.flashinfer_autotune import (
+    autotune_sm120_nvfp4_prefill,
     run_flashinfer_autotune_forward,
     should_run_flashinfer_autotune,
 )
@@ -302,6 +303,7 @@ class BaseRunner(ABC):
                 buffers=buffers,
                 run_ctx=canary_run_ctx,
             )
+            autotune_sm120_nvfp4_prefill(self.model_runner)
 
         run_flashinfer_autotune_forward(self.model_runner, forward_fn, skip_logits=True)
 

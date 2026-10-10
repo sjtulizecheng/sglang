@@ -141,6 +141,12 @@ def flashinfer_autotune_cache_path(model_runner: ModelRunner) -> Path:
     # A different skip policy must not reuse previously tuned tactics.
     skip_ops = get_flashinfer_autotune_skip_ops(mr)
     model_key_parts.append("skip_ops=" + ",".join(sorted(skip_ops)))
+    if (
+        major == 12
+        and server_args.quantization == "nvfp4_online"
+        and envs.SGLANG_SM120_NVFP4_PREFILL_AUTOTUNE.get()
+    ):
+        model_key_parts.append("sm120_nvfp4_prefill_autotune=1")
     if mr.is_draft_worker:
         model_key_parts.append(f"draft_quant={mr.model_config.quantization}")
     model_key = "|".join(model_key_parts)
@@ -206,6 +212,79 @@ def run_flashinfer_autotune_forward(
     """Run flashinfer autotune forward."""
     with flashinfer_autotune_context(model_runner, skip_logits=skip_logits):
         forward_fn()
+
+
+def autotune_sm120_nvfp4_prefill(model_runner: ModelRunner) -> None:
+    """Cover prefill MoE shapes missing from the dummy decode forward.
+
+    Called inside the existing autotune context, before CUDA graph capture.
+    Only one representative layer per MoE shape is needed: the FlashInfer
+    tactic cache is keyed by tensor shapes, not by individual layer weights.
+    """
+    mr = model_runner
+    args = mr.server_args
+    if (
+        not envs.SGLANG_SM120_NVFP4_PREFILL_AUTOTUNE.get()
+        or mr.device != "cuda"
+        or mr.is_draft_worker
+        or args.quantization != "nvfp4_online"
+        or args.moe_runner_backend != "flashinfer_cutlass"
+        or mr.ps.tp_size != 1
+        or mr.ps.moe_ep_size != 1
+        or torch.cuda.get_device_capability(mr.device)[0] != 12
+    ):
+        return
+
+    budgets = [
+        n
+        for n in (args.max_prefill_tokens, args.chunked_prefill_size)
+        if n is not None and n > 0
+    ]
+    if not budgets:
+        return
+    num_tokens = min(budgets)
+    if num_tokens <= (args.max_running_requests or 1):
+        return
+
+    from sglang.srt.layers.moe.token_dispatcher.standard import StandardDispatchOutput
+    from sglang.srt.layers.moe.topk import StandardTopKOutput
+    from sglang.srt.layers.quantization.nvfp4_online import (
+        ModelOptNvFp4OnlineFusedMoEMethod,
+    )
+
+    seen = set()
+    for name, layer in mr.model.named_modules():
+        method = getattr(layer, "quant_method", None)
+        if not isinstance(method, ModelOptNvFp4OnlineFusedMoEMethod):
+            continue
+        config = method.moe_runner_config
+        key = (
+            tuple(layer.w13_weight.shape),
+            tuple(layer.w2_weight.shape),
+            config.top_k,
+            config.activation,
+            config.is_gated,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        device = layer.w13_weight.device
+        hidden = config.hidden_size
+        top_k = config.top_k
+        experts = layer.w13_weight.shape[0]
+        x = torch.zeros((num_tokens, hidden), dtype=mr.dtype, device=device)
+        ids = torch.arange(num_tokens * top_k, device=device, dtype=torch.int32)
+        ids = (ids % experts).reshape(num_tokens, top_k)
+        weights = torch.full(ids.shape, 1.0 / top_k, device=device, dtype=torch.float32)
+        dispatch = StandardDispatchOutput(
+            hidden_states=x,
+            hidden_states_scale=None,
+            topk_output=StandardTopKOutput(weights, ids, None),
+        )
+        logger.info(
+            "Autotuning SM120 NVFP4 prefill: layer=%s tokens=%d", name, num_tokens
+        )
+        method.apply(layer, dispatch)
 
 
 def maybe_flashinfer_autotune_speculative_draft(

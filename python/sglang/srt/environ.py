@@ -697,6 +697,7 @@ class Envs:
     SGLANG_SM120_FLASHMLA_BACKEND = EnvStr("flashinfer")
     # Experimental dense 512+64 MLA decode with unit-scale E4M3 KV storage.
     SGLANG_SM120_FP8_MLA_DECODE = EnvBool(False)
+    SGLANG_SM120_NVFP4_PREFILL_AUTOTUNE = EnvBool(False)
 
     # Triton
     SGLANG_TRITON_DECODE_ATTN_STATIC_KV_SPLITS = EnvBool(False)
