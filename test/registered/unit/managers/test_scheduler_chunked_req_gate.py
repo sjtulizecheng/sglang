@@ -90,6 +90,8 @@ def _scheduler_for_get_next_batch(*, tree_cache, chunked_req) -> Scheduler:
     s.running_batch.is_prefill_only = False
     s.running_batch.batch_is_full = False
     s.running_batch.reqs = []
+    s.prefill_decode_interval = 0
+    s._prefill_decode_interval_remaining = 0
     s.get_new_batch_prefill = MagicMock(
         return_value=NextBatchPlan(batch_to_run=None, running_batch=s.running_batch)
     )
@@ -148,6 +150,20 @@ class TestStashGatePreservesPrefixIndices(CustomTestCase):
 
         self.assertEqual(req.prefix_indices.shape[0], self.INITIAL_PREFIX_LEN)
         self.assertTrue(torch.equal(req.prefix_indices, initial_prefix))
+
+    def test_decode_interval_does_not_park_only_chunked_request(self):
+        s, _, _, _ = self._build(fill_len=self.INITIAL_PREFIX_LEN)
+        s.prefill_decode_interval = 2
+        s._prefill_decode_interval_remaining = 2
+
+        Scheduler.get_next_batch_to_run(
+            s, running_batch=s.running_batch, last_batch=s.last_batch
+        )
+
+        # No requests can decode. Do not spend interval ticks on empty
+        # iterations instead of advancing the prefill continuation.
+        s.get_new_batch_prefill.assert_called_once_with(s.running_batch)
+        self.assertEqual(s._prefill_decode_interval_remaining, 0)
 
     def test_scheduled_chunked_req_advances_prefix_indices_via_real_stash(self):
         # Symmetric guard against over-gating: when fill_len has advanced past

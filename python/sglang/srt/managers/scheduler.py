@@ -3186,6 +3186,20 @@ class Scheduler(
 
         if self.chunked_req is not None:
             self.chunked_req.init_next_round_input()
+            # The continuation uses one request slot. Do not shrink it for
+            # waiting requests that cannot be admitted at this concurrency.
+            short_req_slots = max(0, self.get_num_allocatable_reqs(running_bs) - 1)
+            if get_schedule().prefill_max_requests is not None:
+                short_req_slots = min(
+                    short_req_slots, max(0, get_schedule().prefill_max_requests - 1)
+                )
+            adder.chunked_req_limit = self.policy.shortest_prefill_chunk_limit(
+                self.chunked_req,
+                self.waiting_queue,
+                adder.rem_chunk_tokens or 0,
+                self.page_size,
+                max_waiting_reqs=short_req_slots,
+            )
             self.chunked_req = adder.add_chunked_req(self.chunked_req)
 
         if self.enable_lora:

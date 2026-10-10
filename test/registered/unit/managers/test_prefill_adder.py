@@ -2,12 +2,19 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import torch
+
 from sglang.srt.managers.schedule_batch import Req
-from sglang.srt.managers.schedule_policy import AddReqResult, PrefillAdder
+from sglang.srt.managers.schedule_policy import (
+    AddReqResult,
+    PrefillAdder,
+    SchedulePolicy,
+)
 from sglang.srt.mem_cache.base_prefix_cache import (
     DecLockRefResult,
     IncLockRefResult,
 )
+from sglang.srt.mem_cache.radix_cache import RadixCache
 from sglang.srt.server_args import ServerArgs, set_global_server_args_for_scheduler
 from sglang.srt.utils.common import Range
 from sglang.test.ci.ci_register import (
@@ -115,6 +122,101 @@ class TestPrefillAdder(CustomTestCase):
         )
         defaults.update(kwargs)
         return PrefillAdder(**defaults)
+
+    def create_shortest_prefill_adder(self, *, chunk_tokens=4096):
+        self.mock_tree_cache.is_tree_cache.return_value = False
+        self.mock_token_allocator.available_size.return_value = 32768
+        return self.create_adder(
+            self.create_running_batch(), page_size=256, rem_chunk_tokens=chunk_tokens
+        )
+
+    def create_prefill_req(self, rid, length):
+        req = self.create_mock_req(rid, priority=0, max_new_tokens=4)
+        req.last_node = MagicMock()
+        req.best_match_node = req.last_node
+        req.origin_input_ids = list(range(length))
+        req.full_untruncated_fill_ids = list(range(length))
+        req.num_matched_prefix_tokens = 0
+        req.host_hit_length = 0
+        req.sampling_params.ignore_eos = False
+        req.set_extend_range = MagicMock(
+            side_effect=lambda start, end: setattr(
+                req, "extend_range", Range(start, end)
+            )
+        )
+        return req
+
+    def test_shortest_prefill_reserves_space_for_complete_waiting_requests(self):
+        adder = self.create_shortest_prefill_adder()
+        policy = SchedulePolicy(
+            policy="shortest-prefill-first",
+            tree_cache=RadixCache.create_simulated(),
+            enable_hierarchical_cache=False,
+            enable_priority_scheduling=False,
+            schedule_low_priority_values_first=False,
+        )
+        continuation = self.create_prefill_req("continuation", 16384)
+        waiting = [
+            self.create_prefill_req("a", 512),
+            self.create_prefill_req("b", 1024),
+        ]
+        adder.chunked_req_limit = policy.shortest_prefill_chunk_limit(
+            continuation, waiting, adder.rem_chunk_tokens, adder.page_size
+        )
+        self.assertIs(adder.add_chunked_req(continuation), continuation)
+        self.assertEqual(continuation.extend_range.length, 2560)
+        for req in waiting:
+            adder.add_one_req(req, has_chunked_req=True, truncation_align_size=None)
+        self.assertEqual(adder.can_run_list, [continuation, *waiting])
+        self.assertIsNone(adder.new_chunked_req)
+        self.assertEqual(adder.rem_chunk_tokens, 0)
+        self.assertGreaterEqual(adder.rem_total_tokens, 0)
+
+    def test_shortest_prefill_rejects_second_unfinished_chunk(self):
+        adder = self.create_shortest_prefill_adder(chunk_tokens=512)
+        req = self.create_prefill_req("second-chunk", 1024)
+        self.assertEqual(
+            adder.add_one_req(req, has_chunked_req=True, truncation_align_size=None),
+            AddReqResult.OTHER,
+        )
+        self.assertEqual(adder.can_run_list, [])
+        self.assertIsNone(adder.new_chunked_req)
+        req.set_extend_range.assert_not_called()
+        self.mock_tree_cache.init_load_back.assert_not_called()
+
+    def test_shortest_prefill_rechecks_chunk_limit_after_host_miss(self):
+        adder = self.create_shortest_prefill_adder(chunk_tokens=512)
+        req = self.create_prefill_req("host-miss", 1024)
+        req.prefix_indices = torch.empty(0, dtype=torch.int64)
+        req.host_hit_length = 768
+        req.needs_host_load_back.return_value = True
+        self.mock_tree_cache.init_load_back.return_value = (
+            torch.empty(0, dtype=torch.int64),
+            req.last_node,
+        )
+        self.assertEqual(
+            adder.add_one_req(req, has_chunked_req=True, truncation_align_size=None),
+            AddReqResult.OTHER,
+        )
+        self.mock_tree_cache.init_load_back.assert_called_once()
+        self.assertEqual(adder.can_run_list, [])
+        req.set_extend_range.assert_not_called()
+
+    def test_shortest_prefill_preserves_memory_admission(self):
+        adder = self.create_shortest_prefill_adder()
+        self.mock_token_allocator.available_size.return_value = 256
+        req = self.create_prefill_req("no-memory", 512)
+        self.assertEqual(
+            adder.add_one_req(req, has_chunked_req=True, truncation_align_size=None),
+            AddReqResult.NO_TOKEN,
+        )
+        self.assertEqual(adder.can_run_list, [])
+
+    def test_continuation_without_limit_keeps_normal_chunk_size(self):
+        adder = self.create_shortest_prefill_adder()
+        req = self.create_prefill_req("continuation", 8192)
+        self.assertIs(adder.add_chunked_req(req), req)
+        self.assertEqual(req.extend_range.length, 4096)
 
     def test_preempt_success_high_priority_values_first(self):
         params = [

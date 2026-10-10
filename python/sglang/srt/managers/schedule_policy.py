@@ -152,6 +152,7 @@ class CacheAwarePolicy(Enum):
     LPM = "lpm"  # longest prefix match
     DFS_WEIGHT = "dfs-weight"  # depth-first search weighting
     HRRN = "hrrn"  # highest response ratio next, token-based aging
+    SHORTEST_PREFILL_FIRST = "shortest-prefill-first"
 
 
 class CacheAgnosticPolicy(Enum):
@@ -225,6 +226,10 @@ class SchedulePolicy:
                 SchedulePolicy._sort_by_hrrn(
                     waiting_queue, temporary_deprioritized, processed_tokens
                 )
+            elif policy == CacheAwarePolicy.SHORTEST_PREFILL_FIRST:
+                SchedulePolicy._sort_by_shortest_prefill(
+                    waiting_queue, temporary_deprioritized
+                )
             else:
                 raise ValueError(f"Unknown CacheAware Policy: {policy=}")
         else:
@@ -263,6 +268,10 @@ class SchedulePolicy:
         """
         Validates the policy and adjusts it if necessary based on tree cache settings.
         """
+        if policy == "shortest-prefill-first" and getattr(tree_cache, "disable", True):
+            raise ValueError(
+                "Experimental shortest-prefill-first requires prefix caching"
+            )
         try:
             policy_enum = CacheAwarePolicy(policy)
             if getattr(tree_cache, "disable", True):
@@ -325,8 +334,58 @@ class SchedulePolicy:
                     )
         return temporary_deprioritized
 
+    @staticmethod
+    def _shortest_prefill_work(r: Req) -> int:
+        # extend_range is not initialized yet for new waiting requests.
+        return max(
+            1,
+            len(r.origin_input_ids) + len(r.output_ids) - r.num_matched_prefix_tokens,
+        )
 
+    @staticmethod
+    def _sort_by_shortest_prefill(
+        waiting_queue: List[Req], temporary_deprioritized: Set[int]
+    ) -> None:
+        waiting_queue.sort(
+            key=lambda r: (
+                r.rid in temporary_deprioritized,
+                SchedulePolicy._shortest_prefill_work(r),
+                r.time_stats.wait_queue_entry_time,
+            )
+        )
 
+    def shortest_prefill_chunk_limit(
+        self,
+        chunked_req: Req,
+        waiting_queue: List[Req],
+        budget: int,
+        page_size: int,
+        max_waiting_reqs: Optional[int] = None,
+    ) -> Optional[int]:
+        """Reserve complete short prefills while keeping the continuation moving."""
+        if (
+            self.policy != CacheAwarePolicy.SHORTEST_PREFILL_FIRST
+            or budget < 2 * page_size
+        ):
+            return None
+        remaining = len(chunked_req.full_untruncated_fill_ids) - len(
+            chunked_req.prefix_indices
+        )
+        reserved = 0
+        candidates = (
+            waiting_queue
+            if max_waiting_reqs is None
+            else waiting_queue[:max_waiting_reqs]
+        )
+        for req in candidates:
+            work = self._shortest_prefill_work(req)
+            charge = -(-work // page_size) * page_size
+            if work >= remaining or reserved + charge > budget - page_size:
+                break
+            reserved += charge
+        if not reserved:
+            return None
+        return (budget - reserved) // page_size * page_size
 
     @staticmethod
     def _sort_by_longest_prefix(
@@ -530,6 +589,7 @@ class PrefillAdder:
         self.new_token_ratio = new_token_ratio
         self.rem_input_tokens = rem_input_tokens - num_mixed_decode_tokens
         self.rem_chunk_tokens = rem_chunk_tokens
+        self.chunked_req_limit: Optional[int] = None
         self.dllm_config = dllm_config
 
         if self.dllm_config is not None:
@@ -957,6 +1017,9 @@ class PrefillAdder:
                 waiting_queue_len=self.waiting_queue_len,
             )
 
+        if self.chunked_req_limit is not None:
+            assert self.chunked_req_limit > 0
+            _rem_tokens = min(_rem_tokens, self.chunked_req_limit)
 
         cand_extend_input_len = len(req.full_untruncated_fill_ids) - len(
             req.prefix_indices
@@ -1206,6 +1269,16 @@ class PrefillAdder:
                         return AddReqResult.NO_TOKEN
                     chunk_tokens_limit = min(self.rem_chunk_tokens, swa_cap)
 
+            # A continuation may leave room for complete short requests, but
+            # the scheduler can only track one unfinished chunked request.
+            if (
+                has_chunked_req
+                and self.dllm_config is None
+                and chunk_tokens_limit is not None
+                and real_input_tokens > chunk_tokens_limit
+            ):
+                return AddReqResult.OTHER
+
             # Negotiate only after every KV-budget gate (a NO_TOKEN rank must
             # report not-prefillable via finalize()) and before init_load_back
             # (a delay verdict must not start KV load-back).
@@ -1275,6 +1348,10 @@ class PrefillAdder:
                     mamba_gap_reserve=self._mamba_gap_budget_for_req(req),
                 )
             else:
+                # Recheck after host load-back: a host miss can turn an
+                # estimated complete prefill into a second unfinished chunk.
+                if has_chunked_req:
+                    return AddReqResult.OTHER
                 # Make sure at least one page is available
                 trunc_len = chunk_tokens_limit // self.page_size * self.page_size
 
