@@ -236,6 +236,13 @@ class FlashInferMLAAttnBackend(AttentionBackend):
             and not get_exec().kernel.flashinfer_mla_disable_ragged
         )
         self.page_size = model_runner.page_size
+        self.use_sm120_fp8_decode = (
+            envs.SGLANG_SM120_FP8_MLA_DECODE.get()
+            and torch.cuda.is_available()
+            and torch.cuda.get_device_capability(self.device)[0] == 12
+            and self.page_size == 1
+            and not get_parallel().dcp_enabled
+        )
 
         # Allocate buffers
         # different from flashinfer zero_init_global_workspace_buffer
@@ -657,7 +664,33 @@ class FlashInferMLAAttnBackend(AttentionBackend):
             q_nope = reshaped_q[:, :, : layer.v_head_dim]
             q_rope = reshaped_q[:, :, layer.v_head_dim :]
 
-        k_buffer = self.token_to_kv_pool.get_key_buffer(layer.layer_id).to(q.dtype)
+        k_buffer = self.token_to_kv_pool.get_key_buffer(layer.layer_id)
+        if (
+            self.use_sm120_fp8_decode
+            and forward_batch.forward_mode.is_decode()
+            and forward_batch.spec_info is None
+            and q_nope.dtype == torch.bfloat16
+            and q_nope.shape[-1] == 512
+            and q_rope.shape[-1] == 64
+            and k_buffer.dtype == torch.float8_e4m3fn
+            and k_buffer.ndim == 3
+            and k_buffer.shape[1:] == (1, 576)
+        ):
+            from sglang.kernels.ops.attention.fp8_mla_decode_sm120 import fp8_mla_decode
+
+            # The fast graph planner does not refresh the wrapper's indptr.
+            # The indices updater writes self.kv_indptr on every replay, while
+            # the wrapper's index buffer contains the translated physical slots.
+            o = fp8_mla_decode(
+                q_nope,
+                q_rope,
+                k_buffer,
+                self.kv_indptr,
+                decode_wrapper._kv_indices_buf,
+                layer.scaling,
+            )
+            return o.view(-1, layer.tp_q_head_num * layer.v_head_dim)
+        k_buffer = k_buffer.to(q.dtype)
 
         o = q_nope.new_empty(q_nope.shape)
         # for decode and dcp_world_size > 1, lse should be returned to compute final attn_out
