@@ -8,10 +8,29 @@ import torch.nn as nn
 logger = logging.getLogger(__name__)
 
 
+def split_forward_hooks_by_capture_phase(hook_specs):
+    """Keep ordinary hooks eager-only; allow explicit graph-safe factories early."""
+    before, after = [], []
+    for spec in hook_specs or ():
+        phase = spec.get("capture_phase", "after_graph")
+        if phase == "before_graph":
+            before.append(spec)
+        elif phase == "after_graph":
+            after.append(spec)
+        else:
+            raise ValueError(
+                f"Invalid forward hook capture_phase {phase!r}; "
+                "expected 'before_graph' or 'after_graph'"
+            )
+    return before, after
+
+
 def register_forward_hooks(model: nn.Module, hook_specs: List[dict[str, Any]]) -> None:
     """
     hook_specs is a list of dicts from server_args.forward_hooks.
     Attaches forward hooks to the matching modules.
+    capture_phase defaults to after_graph. Explicit before_graph factories and
+    callbacks must be safe during CUDA graph warmup and capture.
     """
     name_to_module = dict(model.named_modules())
 

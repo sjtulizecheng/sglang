@@ -28,7 +28,10 @@ from sglang.srt.model_executor.graph_memory_usage import (
     merge_graph_time_usage,
 )
 from sglang.srt.model_executor.graph_shared_output import GraphSharedOutput
-from sglang.srt.model_executor.hook_manager import register_forward_hooks
+from sglang.srt.model_executor.hook_manager import (
+    register_forward_hooks,
+    split_forward_hooks_by_capture_phase,
+)
 from sglang.srt.model_executor.model_runner_components.layer_setup import (
     compute_attention_and_moe_layers,
 )
@@ -116,6 +119,14 @@ def capture_cuda_graphs(
         model_runner
     )
 
+    before_graph_hooks, after_graph_hooks = split_forward_hooks_by_capture_phase(
+        model_runner.server_args.forward_hooks
+    )
+    # Explicitly opted-in factories may replace kernels that must be present
+    # during graph warmup/capture. Ordinary diagnostic hooks keep the late path.
+    if before_graph_hooks:
+        register_forward_hooks(model_runner.model, before_graph_hooks)
+
     # The eager (no-cuda-graph) phase runner, built AFTER the attention
     # backend so its __init__ can warm up kernels (run-once) and allocate the
     # fixed-max static buffer — both before the cuda-graph runners, so that
@@ -154,14 +165,10 @@ def capture_cuda_graphs(
             capture_time=0,
         )
 
-    # Register forward hooks AFTER cuda-graph capture so their tensor ops are
-    # not traced into any captured graph — capture stays hook-free and hooks
-    # fire only on the eager forward path (capture replay never runs Python
-    # hooks anyway).
-    if model_runner.server_args.forward_hooks:
-        register_forward_hooks(
-            model_runner.model, model_runner.server_args.forward_hooks
-        )
+    # Ordinary hooks stay outside captured graphs. CUDA graph replay does not
+    # execute Python hooks, including callbacks explicitly installed earlier.
+    if after_graph_hooks:
+        register_forward_hooks(model_runner.model, after_graph_hooks)
 
     prealloc_symmetric_memory_pool(
         is_draft_worker=model_runner.is_draft_worker,
