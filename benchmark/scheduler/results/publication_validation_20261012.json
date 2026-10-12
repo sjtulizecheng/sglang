@@ -1,0 +1,112 @@
+{
+  "date": "2026-10-12",
+  "sglang_start": "b8835cd4735d1e22512aed177d78690dae9171b9",
+  "flashinfer_start": "f9a2ce5acf8ea565311238c7a8c991072c9ff010",
+  "hardware": "NVIDIA RTX PRO 5000 72GB Blackwell, SM120",
+  "torch": "2.11.0+cu129",
+  "flashinfer_runtime": "0.6.15.post1",
+  "cute_dsl": "4.6.0",
+  "service_benchmark_rerun": false,
+  "business_quality_accepted": false,
+  "checks": {
+    "hook_phase_cpu_tests": 4,
+    "router_token_counts": [
+      1,
+      31,
+      32,
+      1025,
+      5093
+    ],
+    "dense_projection_shapes": [
+      [
+        8960,
+        512
+      ],
+      [
+        5120,
+        768
+      ],
+      [
+        2048,
+        5120
+      ],
+      [
+        3072,
+        2048
+      ],
+      [
+        2048,
+        1536
+      ]
+    ],
+    "dense_tokens": 1025,
+    "lm_head_batches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ],
+    "lm_head_mutated_replays_per_batch": 3,
+    "moe_real_layers": 3,
+    "moe_token_counts": [
+      1024,
+      1025,
+      8192,
+      16384
+    ],
+    "moe_eager_and_mutated_graph_bitwise_equal": true,
+    "flashinfer_prefill_tests": 2,
+    "flashinfer_projection_tests": 1,
+    "public_base_factory_install": true,
+    "html": {
+      "errors": [],
+      "external_requests": [],
+      "views": {
+        "desktop": {
+          "selector_and_reset": true,
+          "dimensions": {
+            "viewport": 1440,
+            "scroll": 1440
+          },
+          "screenshot": "/tmp/optimization-submit-20261012/pipeline-desktop.png"
+        },
+        "mobile": {
+          "selector_and_reset": true,
+          "dimensions": {
+            "viewport": 390,
+            "scroll": 390
+          },
+          "screenshot": "/tmp/optimization-submit-20261012/pipeline-mobile.png"
+        }
+      }
+    }
+  },
+  "source_sha256": {
+    "benchmark/scheduler/experimental_sm120/lm_head_int8.py": "4017f90a5bfc8e0f9c4d6e1855f27b01058db913f7ca92463d5bc70cf4ebd170",
+    "benchmark/scheduler/experimental_sm120/nvfp4_dense_prefill.py": "066d325aa912bb714d85b99b20c6623e8fe11ded9ee027677788b00ef7976f9c",
+    "benchmark/scheduler/experimental_sm120/nvfp4_dispatch.py": "8bb01dfd805baaf514e676ab5cbdf243e9203a84af2690846e86d3e43345203b",
+    "benchmark/scheduler/experimental_sm120/nvfp4_gemm_sm120_autotune.json": "d8b60bee3d6b18a59defa2cc0fdf7d1a1e3a09569b2671fb1e1c84ed9cbdfb18",
+    "benchmark/scheduler/experimental_sm120/nvfp4_moe_prefill.py": "689abe78bbd6c6c77ef00211df200247881695692cce5dae7c2105b7ae9e9d66",
+    "benchmark/scheduler/experimental_sm120/nvfp4_qkva_prefill.py": "21fe29a1d7cf663140f218c30a63265145c739c81e181b3775961f36394367ae",
+    "benchmark/scheduler/experimental_sm120/tensorcore_router.py": "3c1192a2b7f445dcca81fd0ad1f4be76636a6a12ddbff851963d34f02d0628a3",
+    "benchmark/scheduler/experimental_sm120/tests/test_lm_head_int8.py": "230b6475015be45a2f60a18e203845f44cc843ac8e3d0fab103f4d8e344d673c",
+    "benchmark/scheduler/experimental_sm120/tests/test_nvfp4_dense.py": "218fcc8c7e4fdb676494df34d8186e1acd9d8e704dec1dd81b0a97b1b4d1a66f",
+    "benchmark/scheduler/experimental_sm120/tests/test_nvfp4_moe.py": "e0664f84e65c0c34c9b00b2dd15434088a4eff87ed41e467b7e4d8957d425284",
+    "benchmark/scheduler/experimental_sm120/tests/test_tensorcore_router.py": "26a55334440250a172afceb6533c86c2954f3e3b5355825f5baa47b3f5e49b1e",
+    "python/sglang/srt/model_executor/hook_manager.py": "21e8d94105eeefcb52b819094ceeb1fd7e0e5c8b814c96c79220ab91103add49",
+    "python/sglang/srt/model_executor/model_runner_components/cuda_graph_setup.py": "b6cca973b96b3723db694883ad9936b9ce4a4bce4373ced16acd220fa93a80fc",
+    "test/registered/unit/test_forward_hook_capture_phase.py": "5804abbf83dd1f0414b8775c9d3f8fde8293e002ca56ba6a586cd9224f181aae"
+  }
+}
