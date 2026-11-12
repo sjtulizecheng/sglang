@@ -4892,7 +4892,8 @@ class DeepseekV4ForCausalLM(nn.Module):
         self.tp_size = get_parallel().tp_size
         self.quant_config = quant_config
         self.wo_a_fp8 = wo_a_fp8_gemm_enabled(quant_config)
-        self.determine_num_fused_shared_experts()
+        # v0.5.23 installs the fusion decision in the model-loading context.
+        self.num_fused_shared_experts = get_num_fused_shared_experts()
         self.pp_group = get_pp_group()
         self.dsv41_multimodal_enabled = _dsv41_multimodal_enabled(config)
         self.vision = None
