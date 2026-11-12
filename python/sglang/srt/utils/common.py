@@ -1677,6 +1677,44 @@ def make_layers(
     return modules, start_layer, end_layer
 
 
+def make_pp_layers(
+    num_hidden_layers: int,
+    layer_fn: LayerFn,
+    prefix: str = "",
+    return_tuple: bool = False,
+    offloader_kwargs: Optional[Dict[str, Any]] = None,
+    final_read: Optional[Any] = None,
+    stage_facts: Optional[Callable[[int], Sequence[Any]]] = None,
+) -> Tuple[torch.nn.Module, int, int]:
+    """Make this pipeline stage's layers, and return them with the stage's range.
+
+    Layers outside ``[start_layer, end_layer)`` are ``PPMissingLayer`` stand-ins.
+    ``stage_facts`` is the model's shared declaration function (see make_layers).
+    """
+    parallel = get_parallel()
+    return make_layers(
+        num_hidden_layers,
+        layer_fn,
+        pp_rank=parallel.pp_rank,
+        pp_size=parallel.pp_size,
+        prefix=prefix,
+        return_tuple=return_tuple,
+        offloader_kwargs=offloader_kwargs,
+        final_read=final_read,
+        stage_facts=stage_facts,
+    )
+
+
+def _no_stage_facts(layer_fn: LayerFn) -> None:
+    """Stands in for a model without a shared stage-declaration function."""
+    module = getattr(getattr(layer_fn, "func", layer_fn), "__module__", None)
+    raise ValueError(
+        f"{module} declares stage boundaries under pipeline parallelism "
+        "without a shared declaration function: give make_layers its "
+        "stage_facts, the stages a layer declares without building it"
+    )
+
+
 def make_layers_from_ids(
     num_hidden_layers: int,
     layer_ids: Sequence[int],
